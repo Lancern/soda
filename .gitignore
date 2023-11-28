@@ -1,0 +1,9 @@
+# IDE related files.
+.idea/
+.vscode/
+
+# macOS Finder garbage.
+.DS_Store
+
+# Build directory.
+/target
