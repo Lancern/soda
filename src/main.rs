@@ -1,8 +1,13 @@
+mod ctx;
+
 use std::error::Error;
 use std::path::PathBuf;
 
+use chainerror::Context as _;
 use log::{Level as LogLevel, SetLoggerError};
 use structopt::StructOpt;
+
+use crate::ctx::Context;
 
 #[derive(Clone, Debug, StructOpt)]
 #[structopt(
@@ -31,13 +36,24 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // TODO: implement main.
 
+    log::info!("Reading input shared library ...");
+    let input_buffer = std::fs::read(&args.input).context(format!(
+        "read input shared library {}",
+        args.input.display()
+    ))?;
+
+    let ctx = Context::new(&input_buffer)?;
+
+    // TODO: implement here.
+
     Ok(())
 }
 
 fn init_logger(verbosity: u8) -> Result<(), SetLoggerError> {
     let level = match verbosity {
-        0 => LogLevel::Info,
-        1 => LogLevel::Debug,
+        0 => LogLevel::Warn,
+        1 => LogLevel::Info,
+        2 => LogLevel::Debug,
         _ => LogLevel::Trace,
     };
     simple_logger::init_with_level(level)?;
