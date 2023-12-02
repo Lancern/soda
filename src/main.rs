@@ -67,8 +67,7 @@ fn main() -> anyhow::Result<()> {
         args.input.display()
     ))?;
 
-    let mut output_buffer = Vec::new();
-    let mut ctx = Context::new(&input_buffer, &mut output_buffer)?;
+    let mut ctx = Context::new(&input_buffer)?;
 
     // Initialize passes.
     let mut passes = PassManager::new();

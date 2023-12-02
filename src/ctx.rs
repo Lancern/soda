@@ -14,9 +14,6 @@ pub struct Context<'d> {
 
     /// The output object.
     pub output: OutputObject<'d>,
-
-    /// The output data buffer.
-    pub output_buffer: &'d mut Vec<u8>,
 }
 
 impl<'d> Context<'d> {
@@ -27,21 +24,14 @@ impl<'d> Context<'d> {
     /// - Check the class, architecture, OS, etc. and ensure that we can properly handle the shared library;
     /// - Create an output object builder on top of the given output buffer;
     /// - Create a new `Context` object and wraps the parsed input file and output object.
-    pub fn new(
-        input_buffer: &'d [u8],
-        output_buffer: &'d mut Vec<u8>,
-    ) -> Result<Self, CreateContextError> {
+    pub fn new(input_buffer: &'d [u8]) -> Result<Self, CreateContextError> {
         let input = InputFile::parse(input_buffer)?;
         let output = match &input {
             InputFile::Elf32(elf32) => Self::from_elf_input_file(elf32)?,
             InputFile::Elf64(elf64) => Self::from_elf_input_file(elf64)?,
             input => return Err(CreateContextError::UnsupportedBinaryFormat(input.format())),
         };
-        Ok(Self {
-            input,
-            output,
-            output_buffer,
-        })
+        Ok(Self { input, output })
     }
 
     /// Get the endian.
