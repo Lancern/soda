@@ -4,7 +4,6 @@ use object::read::elf::{ElfFile, FileHeader as ElfFileHeader};
 use object::write::Object as OutputObject;
 use object::ReadRef;
 
-use crate::elf::pass::copy_sections::CopySectionsPass;
 use crate::elf::pass::loader::LoaderPass;
 use crate::elf::pass::{ElfPass, ElfPassHandle};
 use crate::pass::PassContext;
@@ -12,18 +11,11 @@ use crate::pass::PassContext;
 #[derive(Debug)]
 pub struct RelocatePass {
     loader: ElfPassHandle<LoaderPass>,
-    copied_sections: ElfPassHandle<CopySectionsPass>,
 }
 
 impl RelocatePass {
-    pub fn new(
-        loader: ElfPassHandle<LoaderPass>,
-        copied_sections: ElfPassHandle<CopySectionsPass>,
-    ) -> Self {
-        Self {
-            loader,
-            copied_sections,
-        }
+    pub fn new(loader: ElfPassHandle<LoaderPass>) -> Self {
+        Self { loader }
     }
 }
 

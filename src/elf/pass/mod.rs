@@ -1,4 +1,3 @@
-pub mod copy_sections;
 pub mod loader;
 pub mod relocate;
 
@@ -10,7 +9,7 @@ use object::write::Object as OutputObject;
 use object::ReadRef;
 
 use crate::ctx::Context;
-use crate::pass::{Pass, PassContext, PassHandle};
+use crate::pass::{Pass, PassContext, PassHandle, PassManager};
 
 pub trait ElfPass: 'static {
     const NAME: &'static str;
@@ -59,3 +58,20 @@ impl<P: ElfPass> Pass for ElfPassAdaptor<P> {
 }
 
 pub type ElfPassHandle<P> = PassHandle<ElfPassAdaptor<P>>;
+
+pub trait PassManagerExt {
+    fn add_elf_pass<P: ElfPass>(&mut self, pass: P) -> ElfPassHandle<P>;
+
+    fn add_elf_pass_default<P>(&mut self) -> ElfPassHandle<P>
+    where
+        P: ElfPass + Default,
+    {
+        self.add_elf_pass(P::default())
+    }
+}
+
+impl PassManagerExt for PassManager {
+    fn add_elf_pass<P: ElfPass>(&mut self, pass: P) -> ElfPassHandle<P> {
+        self.add_pass(ElfPassAdaptor::adapt(pass))
+    }
+}
