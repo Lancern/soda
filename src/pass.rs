@@ -18,17 +18,17 @@ pub trait Pass: 'static {
     /// Run the pass.
     fn run<'d>(
         &mut self,
-        ctx: &PassContext<'_, 'd>,
+        ctx: &PassContext<'d>,
         soda: &mut Context<'d>,
     ) -> Result<Self::Output<'d>, Self::Error>;
 }
 
 /// Provide context for running a single pass.
-pub struct PassContext<'p, 'd> {
-    pass_outputs: &'p [PassOutputSlot<'d>],
+pub struct PassContext<'d> {
+    pass_outputs: Vec<PassOutputSlot<'d>>,
 }
 
-impl<'p, 'd> PassContext<'p, 'd> {
+impl<'d> PassContext<'d> {
     /// Get the value produced by the pass referenced by the given handle.
     ///
     /// # Panics
@@ -44,7 +44,7 @@ impl<'p, 'd> PassContext<'p, 'd> {
     }
 }
 
-impl<'p, 'd> Debug for PassContext<'p, 'd> {
+impl<'d> Debug for PassContext<'d> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PassContext")
             .field(
@@ -56,20 +56,15 @@ impl<'p, 'd> Debug for PassContext<'p, 'd> {
 }
 
 /// Manage and run a flow of passes.
-pub struct PassManager<'d> {
+#[derive(Default)]
+pub struct PassManager {
     passes: Vec<Box<dyn AbstractPass>>,
-    pass_outputs: Vec<PassOutputSlot<'d>>,
-    current_pass_idx: usize,
 }
 
-impl<'d> PassManager<'d> {
+impl PassManager {
     /// Create a new `PassManager` that does not contain any passes.
     pub fn new() -> Self {
-        Self {
-            passes: Vec::new(),
-            pass_outputs: Vec::new(),
-            current_pass_idx: 0,
-        }
+        Self { passes: Vec::new() }
     }
 
     /// Add a pass to the end of the current pass pipeline.
@@ -91,16 +86,15 @@ impl<'d> PassManager<'d> {
     }
 
     /// Run the pass pipeline.
-    pub fn run(mut self, ctx: &mut Context<'d>) -> Result<(), RunPassError> {
-        while self.current_pass_idx < self.passes.len() {
-            let current_pass = &mut *self.passes[self.current_pass_idx];
+    pub fn run(mut self, ctx: &mut Context) -> Result<(), RunPassError> {
+        let mut pass_ctx = PassContext {
+            pass_outputs: Vec::with_capacity(self.passes.len()),
+        };
 
-            let pass_ctx = PassContext {
-                pass_outputs: &self.pass_outputs,
-            };
+        for current_pass in &mut self.passes {
             match current_pass.run(&pass_ctx, ctx) {
                 Ok(result) => {
-                    self.pass_outputs.push(result);
+                    pass_ctx.pass_outputs.push(result);
                 }
                 Err(err) => {
                     return Err(RunPassError {
@@ -109,20 +103,17 @@ impl<'d> PassManager<'d> {
                     });
                 }
             }
-
-            self.current_pass_idx += 1;
         }
 
         Ok(())
     }
 }
 
-impl<'d> Debug for PassManager<'d> {
+impl Debug for PassManager {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let pass_names: Vec<_> = self.passes.iter().map(|p| p.name()).collect();
         f.debug_struct("PassManager")
             .field("passes", &pass_names)
-            .field("current_pass_idx", &self.current_pass_idx)
             .finish()
     }
 }
@@ -178,7 +169,7 @@ trait AbstractPass {
 
     fn run<'d>(
         &mut self,
-        ctx: &PassContext<'_, 'd>,
+        ctx: &PassContext<'d>,
         soda: &mut Context<'d>,
     ) -> anyhow::Result<PassOutputSlot<'d>>;
 }
@@ -190,7 +181,7 @@ impl<P: Pass> AbstractPass for P {
 
     fn run<'d>(
         &mut self,
-        ctx: &PassContext<'_, 'd>,
+        ctx: &PassContext<'d>,
         soda: &mut Context<'d>,
     ) -> anyhow::Result<PassOutputSlot<'d>> {
         let output = <P as Pass>::run(self, ctx, soda)?;

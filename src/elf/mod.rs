@@ -36,7 +36,7 @@ pub trait ElfPass: 'static {
 
     fn run<'d, E, R>(
         &mut self,
-        ctx: &PassContext<'_, 'd>,
+        ctx: &PassContext<'d>,
         input: &ElfFile<'d, E, R>,
         output: &mut OutputObject<'d>,
         output_writer: &mut ElfWriter,
@@ -58,7 +58,7 @@ impl<P: ElfPass> Pass for ElfPassAdaptor<P> {
 
     fn run<'d>(
         &mut self,
-        ctx: &PassContext<'_, 'd>,
+        ctx: &PassContext<'d>,
         soda: &mut Context<'d>,
     ) -> Result<Self::Output<'d>, Self::Error> {
         let mut writer = ElfWriter::new(soda.endian(), soda.is_64(), soda.output_buffer);

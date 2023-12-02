@@ -36,7 +36,7 @@ impl ElfPass for RelocatePass {
 
     fn run<'d, E, R>(
         &mut self,
-        ctx: &PassContext<'_, 'd>,
+        ctx: &PassContext<'d>,
         input: &ElfFile<'d, E, R>,
         output: &mut OutputObject<'d>,
         output_writer: &mut ElfWriter,
