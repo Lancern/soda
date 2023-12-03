@@ -1,5 +1,4 @@
-pub mod loader;
-pub mod relocate;
+pub mod section;
 
 use std::error::Error;
 
