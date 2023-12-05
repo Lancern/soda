@@ -77,14 +77,6 @@ impl PassManager {
         PassHandle::new(idx)
     }
 
-    /// Add a pass to the end of the current pass pipeline.
-    pub fn add_pass_default<P>(&mut self) -> PassHandle<P>
-    where
-        P: Pass + Default,
-    {
-        self.add_pass(P::default())
-    }
-
     /// Run the pass pipeline.
     pub fn run(mut self, ctx: &mut Context) -> Result<(), RunPassError> {
         let mut pass_ctx = PassContext {

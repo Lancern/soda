@@ -1,4 +1,5 @@
 pub mod section;
+pub mod symbol;
 
 use std::error::Error;
 

@@ -132,6 +132,11 @@ pub struct CopyLodableSectionsOutput {
 }
 
 impl CopyLodableSectionsOutput {
+    /// Determine whether the specified input section is copied into the output section.
+    pub fn is_input_section_copied(&self, idx: SectionIndex) -> bool {
+        self.input_section_ranges.contains_key(&idx)
+    }
+
     fn new(output_section_id: SectionId) -> Self {
         Self {
             output_section_id,
