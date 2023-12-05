@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use object::elf::{PT_LOAD, SHT_PROGBITS};
+use object::elf::{PT_LOAD, SHF_ALLOC, SHF_EXECINSTR, SHF_WRITE, SHT_PROGBITS};
 use object::read::elf::{
     ElfFile, ElfSection, ElfSegment, FileHeader as ElfFileHeader, ProgramHeader as _,
 };
 use object::read::Error as ReadError;
 use object::write::{Object as OutputObject, SectionId};
-use object::{Object, ObjectSection, ObjectSegment, ReadRef, SectionIndex, SectionKind};
+use object::{
+    Object, ObjectSection, ObjectSegment, ReadRef, SectionFlags, SectionIndex, SectionKind,
+};
 
 use crate::elf::pass::ElfPass;
 use crate::pass::PassContext;
@@ -50,6 +52,8 @@ impl ElfPass for CopyLodableSectionsPass {
         if input_sections.is_empty() {
             return Ok(ret);
         }
+
+        output_sec.flags = get_output_section_flags(&input_sections);
 
         // Copy the data of the collected input sections to the output section.
         // First calculate the size and alignment of the output section, together with the offset of each input section
@@ -120,6 +124,38 @@ where
 
     input_sections.sort_by_key(|sec| sec.address());
     input_sections
+}
+
+fn get_output_section_flags<'d, 'f, E, R>(
+    input_sections: &[ElfSection<'d, 'f, E, R>],
+) -> SectionFlags
+where
+    E: ElfFileHeader,
+    R: ReadRef<'d>,
+{
+    let mut writable = false;
+    let mut executable = false;
+
+    for input_sec in input_sections {
+        let sec_flags = match input_sec.flags() {
+            SectionFlags::Elf { sh_flags } => sh_flags,
+            _ => unreachable!(),
+        };
+        writable |= sec_flags & SHF_WRITE as u64 != 0;
+        executable |= sec_flags & SHF_EXECINSTR as u64 != 0;
+    }
+
+    let mut raw_flags = SHF_ALLOC;
+    if writable {
+        raw_flags |= SHF_WRITE;
+    }
+    if executable {
+        raw_flags |= SHF_EXECINSTR;
+    }
+
+    SectionFlags::Elf {
+        sh_flags: raw_flags as u64,
+    }
 }
 
 #[derive(Debug)]
