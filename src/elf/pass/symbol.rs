@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use object::elf::{STV_DEFAULT, STV_PROTECTED};
 use object::read::elf::{ElfFile, ElfSymbol, FileHeader as ElfFileHeader};
 use object::read::Error as ReadError;
 use object::write::{
@@ -14,11 +13,13 @@ use crate::pass::PassContext;
 
 /// A pass that generates the symbol table of the output relocatable file.
 ///
-/// This pass generates the symbol table based on the dynamic symbols of the input shared library:
-/// - For an undefined dynamic symbol in the input shared library, a corresponding undefined symbol will be generated in
-///   the output relocatable file;
-/// - For a defined dynamic symbol with default visibility (i.e. external linkage), a corresponding defined symbol will
-///   be generated in the output relocatable file.
+/// This pass generates the symbol table based on the dynamic symbols of the input shared library. Specifically, for
+/// each dynamic symbol in the input shared library whose containing section is included in the output relocatable file,
+/// a corresponding symbol will be generated in the output relocatable file's symbol table:
+///
+/// - Undefined input symbol will generate a corresponding undefined output symbol;
+/// - Defined local symbol will generate a corresponding defined local symbol;
+/// - Defined external symbol will generate a corresponding defined external symbol.
 ///
 /// This pass will produce a symbol map that maps input dynamic symbols to output symbols.
 #[derive(Debug)]
@@ -53,34 +54,11 @@ impl ElfPass for GenerateSymbolPass {
 
         let mut sym_map = HashMap::new();
         for input_sym in input.dynamic_symbols() {
-            if !input_sym.is_undefined() {
-                // The symbol is a defined symbol. All undefined symbols will be added to the output relocatable file
-                // unconditionally.
-
-                if !input_sym.is_global() {
-                    // Local defined symbols will not be included in the output relocatable file.
+            // Ensure that the section containing the symbol has been copied into the output relocatable file. If not,
+            // such symbols will not cause the generation of an output symbol.
+            if let Some(sym_section_idx) = input_sym.section_index() {
+                if !copied_sections.is_input_section_copied(sym_section_idx) {
                     continue;
-                }
-
-                let sym_vis = match input_sym.flags() {
-                    // The `st_other` field in the dynamic symbol entry gives the symbol's visibility.
-                    SymbolFlags::Elf { st_other, .. } => st_other,
-                    _ => unreachable!(),
-                };
-                if sym_vis != STV_DEFAULT && sym_vis != STV_PROTECTED {
-                    // The symbol is a defined symbol that is not visible from outside of the input shared library.
-                    // We don't include such symbol in the output relocatable file.
-                    continue;
-                }
-
-                // Ensure that the section that contains the symbol has been copied into the output relocatable file.
-                if let Some(sym_section_idx) = input_sym.section_index() {
-                    if !copied_sections.is_input_section_copied(sym_section_idx) {
-                        // Weired. The section that contains this defined symbol is not copied into the output
-                        // relocatable file. For now, we just skip this symbol.
-                        // TODO: maybe emit a warning here?
-                        continue;
-                    }
                 }
             }
 
@@ -110,7 +88,7 @@ where
         SymbolSection::None => OutputSymbolSection::None,
         SymbolSection::Undefined => OutputSymbolSection::Undefined,
         SymbolSection::Absolute => OutputSymbolSection::Absolute,
-        SymbolSection::Common => OutputSymbolSection::None,
+        SymbolSection::Common => OutputSymbolSection::Common,
         SymbolSection::Section(sec_idx) => {
             assert!(copied_sections.is_input_section_copied(sec_idx));
             OutputSymbolSection::Section(copied_sections.output_section_id)
