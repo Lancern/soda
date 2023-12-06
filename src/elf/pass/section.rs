@@ -60,19 +60,28 @@ impl ElfPass for CopyLodableSectionsPass {
         // in the output section.
         let mut output_sec_size = 0u64;
         for input_sec in &input_sections {
+            let input_sec_name = String::from_utf8_lossy(input_sec.name_bytes()?);
+
+            let input_sec_addr = input_sec.address();
             let input_sec_size = input_sec.size();
+            let input_sec_align = input_sec.align();
 
-            output_sec_size = output_sec_size.next_multiple_of(input_sec.align());
-            ret.input_section_ranges.insert(
-                input_sec.index(),
-                output_sec_size..output_sec_size + input_sec_size,
-            );
+            if input_sec_addr < output_sec_size {
+                log::warn!("Overlapping section \"{}\"", input_sec_name);
+            }
+            if input_sec_addr % input_sec_align != 0 {
+                log::warn!("Unaligned input section \"{}\"", input_sec_name);
+            }
 
-            output_sec_size += input_sec_size;
+            let input_sec_end = input_sec_addr.checked_add(input_sec_size).unwrap();
+            output_sec_size = input_sec_end;
+            ret.input_section_ranges
+                .insert(input_sec.index(), input_sec_addr..input_sec_end);
         }
 
         assert!(output_sec_size <= std::usize::MAX as u64);
 
+        // Calculate the alignment of the output section.
         let output_sec_align = input_sections.iter().map(|sec| sec.align()).max().unwrap();
 
         // Then do the data copy.
