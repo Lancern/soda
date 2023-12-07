@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ops::Range;
 
 use object::elf::{PT_LOAD, SHF_ALLOC, SHF_EXECINSTR, SHF_WRITE, SHT_PROGBITS};
@@ -6,7 +5,7 @@ use object::read::elf::{
     ElfFile, ElfSection, ElfSegment, FileHeader as ElfFileHeader, ProgramHeader as _,
 };
 use object::read::Error as ReadError;
-use object::write::{Object as OutputObject, SectionId};
+use object::write::{Object as OutputObject, SectionId, SymbolId};
 use object::{
     Object, ObjectSection, ObjectSegment, ReadRef, SectionFlags, SectionIndex, SectionKind,
 };
@@ -43,9 +42,10 @@ impl ElfPass for CopyLodableSectionsPass {
             "soda".as_bytes().to_vec(),
             SectionKind::Elf(SHT_PROGBITS),
         );
+        let output_sec_sym = output.section_symbol(output_sec_id);
         let output_sec = output.section_mut(output_sec_id);
 
-        let mut ret = CopyLodableSectionsOutput::new(output_sec_id);
+        let mut ret = CopyLodableSectionsOutput::new(output_sec_id, output_sec_sym);
 
         // First we collect all loadable sections.
         let input_sections = collect_loadable_sections(input);
@@ -75,8 +75,10 @@ impl ElfPass for CopyLodableSectionsPass {
 
             let input_sec_end = input_sec_addr.checked_add(input_sec_size).unwrap();
             output_sec_size = input_sec_end;
-            ret.input_section_ranges
-                .insert(input_sec.index(), input_sec_addr..input_sec_end);
+            ret.input_section_ranges.push(CopiedSectionInfo {
+                index: input_sec.index(),
+                output_addr_range: input_sec_addr..input_sec_end,
+            });
         }
 
         assert!(output_sec_size <= std::usize::MAX as u64);
@@ -90,8 +92,9 @@ impl ElfPass for CopyLodableSectionsPass {
             let sec_data = input_sec.uncompressed_data()?;
             assert_eq!(sec_data.len(), input_sec.size() as usize);
 
-            let output_range = ret.input_section_ranges.get(&input_sec.index()).unwrap();
-            let output_range = output_range.start as usize..output_range.end as usize;
+            let input_sec_addr = input_sec.address();
+            let input_sec_size = input_sec.size();
+            let output_range = input_sec_addr as usize..(input_sec_addr + input_sec_size) as usize;
 
             let output_slice = &mut output_buffer[output_range];
             output_slice.copy_from_slice(&sec_data);
@@ -172,22 +175,54 @@ pub struct CopyLodableSectionsOutput {
     /// The section ID of the output section.
     pub output_section_id: SectionId,
 
-    /// Describe the offset range of each input section within the output section.
-    pub input_section_ranges: HashMap<SectionIndex, Range<u64>>,
+    /// The ID of the output section symbol.
+    pub output_section_symbol: SymbolId,
+
+    /// Gives the information about copied sections.
+    pub input_section_ranges: Vec<CopiedSectionInfo>,
 }
 
 impl CopyLodableSectionsOutput {
     /// Determine whether the specified input section is copied into the output section.
     pub fn is_input_section_copied(&self, idx: SectionIndex) -> bool {
-        self.input_section_ranges.contains_key(&idx)
+        self.get_copied_section_info(idx).is_some()
     }
 
-    fn new(output_section_id: SectionId) -> Self {
+    /// Get an iterator that yields the index of all copied input sections.
+    pub fn get_copied_sections(&self) -> impl Iterator<Item = SectionIndex> + '_ {
+        self.input_section_ranges.iter().map(|info| info.index)
+    }
+
+    /// Given the ID of an input section and a offset into that section, this function returns the offset of the
+    /// corresponding location in the output section.
+    pub fn map_input_section_offset(
+        &self,
+        input_sec_idx: SectionIndex,
+        input_sec_offset: u64,
+    ) -> Option<u64> {
+        self.get_copied_section_info(input_sec_idx)
+            .map(|info| info.output_addr_range.start + input_sec_offset)
+    }
+
+    fn new(output_section_id: SectionId, output_section_symbol: SymbolId) -> Self {
         Self {
             output_section_id,
-            input_section_ranges: HashMap::new(),
+            output_section_symbol,
+            input_section_ranges: Vec::new(),
         }
     }
+
+    fn get_copied_section_info(&self, section_idx: SectionIndex) -> Option<&CopiedSectionInfo> {
+        self.input_section_ranges
+            .iter()
+            .find(|info| info.index == section_idx)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CopiedSectionInfo {
+    pub index: SectionIndex,
+    pub output_addr_range: Range<u64>,
 }
 
 fn is_section_in_segment<'d, 'f, E, R>(
