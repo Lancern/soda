@@ -2,7 +2,7 @@ use object::elf::{ELFDATA2LSB, ELFDATA2MSB, EM_386, EM_X86_64};
 use object::read::elf::{ElfFile, ElfFile32, ElfFile64, FileHeader as ElfFileHeader};
 use object::read::{Error as ObjectReadError, File as InputFile, ReadRef};
 use object::write::Object as OutputObject;
-use object::{Architecture, BinaryFormat, Endian, Endianness, Object};
+use object::{Architecture, BinaryFormat, Endianness};
 use thiserror::Error;
 
 /// Provide a context for the whole converting process.
@@ -34,24 +34,9 @@ impl<'d> Context<'d> {
         Ok(Self { input, output })
     }
 
-    /// Get the endian.
-    pub fn endian(&self) -> Endianness {
-        Endianness::from_little_endian(self.input.is_little_endian()).unwrap()
-    }
-
     /// Get the binary format.
     pub fn format(&self) -> BinaryFormat {
         self.output.format()
-    }
-
-    /// Get the target architecture.
-    pub fn arch(&self) -> Architecture {
-        self.output.architecture()
-    }
-
-    /// Determine whether the architecture is 64-bit architecture.
-    pub fn is_64(&self) -> bool {
-        self.input.is_64()
     }
 
     fn from_elf_input_file<E>(

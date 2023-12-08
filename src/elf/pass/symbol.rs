@@ -24,14 +24,7 @@ use crate::pass::PassContext;
 /// This pass will produce a symbol map that maps input dynamic symbols to output symbols.
 #[derive(Debug)]
 pub struct GenerateSymbolPass {
-    copy_sections: ElfPassHandle<CopyLodableSectionsPass>,
-}
-
-impl GenerateSymbolPass {
-    /// Create a new `GenerateSymbolPass`.
-    pub fn new(copy_sections: ElfPassHandle<CopyLodableSectionsPass>) -> Self {
-        Self { copy_sections }
-    }
+    pub cls_pass: ElfPassHandle<CopyLodableSectionsPass>,
 }
 
 impl ElfPass for GenerateSymbolPass {
@@ -50,19 +43,19 @@ impl ElfPass for GenerateSymbolPass {
         E: ElfFileHeader,
         R: ReadRef<'d>,
     {
-        let copied_sections = ctx.get_pass_output(self.copy_sections);
+        let cls_output = ctx.get_pass_output(self.cls_pass);
 
         let mut sym_map = HashMap::new();
         for input_sym in input.dynamic_symbols() {
             // Ensure that the section containing the symbol has been copied into the output relocatable file. If not,
             // such symbols will not cause the generation of an output symbol.
             if let Some(sym_section_idx) = input_sym.section_index() {
-                if !copied_sections.is_input_section_copied(sym_section_idx) {
+                if !cls_output.is_section_copied(sym_section_idx) {
                     continue;
                 }
             }
 
-            let output_sym = create_output_symbol(&input_sym, copied_sections)?;
+            let output_sym = create_output_symbol(&input_sym, cls_output)?;
             let output_sym_id = output.add_symbol(output_sym);
             sym_map.insert(input_sym.index(), output_sym_id);
         }
@@ -73,6 +66,13 @@ impl ElfPass for GenerateSymbolPass {
 
 #[derive(Debug)]
 pub struct SymbolMap(HashMap<SymbolIndex, SymbolId>);
+
+impl SymbolMap {
+    /// Get the output symbol corresponding to the specified input symbol.
+    pub fn get_output_symbol(&self, input_sym: SymbolIndex) -> Option<SymbolId> {
+        self.0.get(&input_sym).copied()
+    }
+}
 
 fn create_output_symbol<'d, 'f, E, R>(
     input_sym: &ElfSymbol<'d, 'f, E, R>,
@@ -90,7 +90,7 @@ where
         SymbolSection::Absolute => OutputSymbolSection::Absolute,
         SymbolSection::Common => OutputSymbolSection::Common,
         SymbolSection::Section(sec_idx) => {
-            assert!(copied_sections.is_input_section_copied(sec_idx));
+            assert!(copied_sections.is_section_copied(sec_idx));
             OutputSymbolSection::Section(copied_sections.output_section_id)
         }
         _ => unreachable!(),

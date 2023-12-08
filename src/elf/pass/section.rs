@@ -75,8 +75,9 @@ impl ElfPass for CopyLodableSectionsPass {
 
             let input_sec_end = input_sec_addr.checked_add(input_sec_size).unwrap();
             output_sec_size = input_sec_end;
-            ret.input_section_ranges.push(CopiedSectionInfo {
+            ret.input_section_ranges.push(SectionMap {
                 index: input_sec.index(),
+                input_addr_range: input_sec_addr..input_sec_end,
                 output_addr_range: input_sec_addr..input_sec_end,
             });
         }
@@ -179,29 +180,21 @@ pub struct CopyLodableSectionsOutput {
     pub output_section_symbol: SymbolId,
 
     /// Gives the information about copied sections.
-    pub input_section_ranges: Vec<CopiedSectionInfo>,
+    pub input_section_ranges: Vec<SectionMap>,
 }
 
 impl CopyLodableSectionsOutput {
     /// Determine whether the specified input section is copied into the output section.
-    pub fn is_input_section_copied(&self, idx: SectionIndex) -> bool {
-        self.get_copied_section_info(idx).is_some()
+    pub fn is_section_copied(&self, idx: SectionIndex) -> bool {
+        self.get_section_map(idx).is_some()
     }
 
-    /// Get an iterator that yields the index of all copied input sections.
-    pub fn get_copied_sections(&self) -> impl Iterator<Item = SectionIndex> + '_ {
-        self.input_section_ranges.iter().map(|info| info.index)
-    }
-
-    /// Given the ID of an input section and a offset into that section, this function returns the offset of the
-    /// corresponding location in the output section.
-    pub fn map_input_section_offset(
-        &self,
-        input_sec_idx: SectionIndex,
-        input_sec_offset: u64,
-    ) -> Option<u64> {
-        self.get_copied_section_info(input_sec_idx)
-            .map(|info| info.output_addr_range.start + input_sec_offset)
+    /// Given an input address, get the offset of the corresponding location in the output section.
+    pub fn map_input_addr(&self, input_addr: u64) -> Option<u64> {
+        self.get_section_map_by_addr(input_addr).map(|map| {
+            let section_offset = input_addr - map.input_addr_range.start;
+            map.output_addr_range.start + section_offset
+        })
     }
 
     fn new(output_section_id: SectionId, output_section_symbol: SymbolId) -> Self {
@@ -212,16 +205,23 @@ impl CopyLodableSectionsOutput {
         }
     }
 
-    fn get_copied_section_info(&self, section_idx: SectionIndex) -> Option<&CopiedSectionInfo> {
+    fn get_section_map(&self, section_idx: SectionIndex) -> Option<&SectionMap> {
         self.input_section_ranges
             .iter()
-            .find(|info| info.index == section_idx)
+            .find(|map| map.index == section_idx)
+    }
+
+    fn get_section_map_by_addr(&self, addr: u64) -> Option<&SectionMap> {
+        self.input_section_ranges
+            .iter()
+            .find(|map| map.input_addr_range.contains(&addr))
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct CopiedSectionInfo {
+pub struct SectionMap {
     pub index: SectionIndex,
+    pub input_addr_range: Range<u64>,
     pub output_addr_range: Range<u64>,
 }
 
