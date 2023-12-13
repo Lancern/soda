@@ -2,14 +2,11 @@ use std::collections::HashMap;
 
 use object::read::elf::{ElfFile, ElfSymbol, FileHeader as ElfFileHeader};
 use object::read::Error as ReadError;
-use object::write::{
-    Object as OutputObject, Symbol as OutputSymbol, SymbolId, SymbolSection as OutputSymbolSection,
-};
+use object::write::{Symbol as OutputSymbol, SymbolId, SymbolSection as OutputSymbolSection};
 use object::{Object, ObjectSymbol, ReadRef, SymbolFlags, SymbolIndex, SymbolSection};
 
 use crate::elf::pass::section::{CopyLodableSectionsOutput, CopyLodableSectionsPass};
-use crate::elf::pass::{ElfPass, ElfPassHandle};
-use crate::pass::PassContext;
+use crate::pass::{Pass, PassContext, PassHandle};
 
 /// A pass that generates the symbol table of the output relocatable file.
 ///
@@ -24,29 +21,30 @@ use crate::pass::PassContext;
 /// This pass will produce a symbol map that maps input dynamic symbols to output symbols.
 #[derive(Debug)]
 pub struct GenerateSymbolPass {
-    pub cls_pass: ElfPassHandle<CopyLodableSectionsPass>,
+    pub cls_pass: PassHandle<CopyLodableSectionsPass>,
 }
 
-impl ElfPass for GenerateSymbolPass {
+impl<'d, E, R> Pass<ElfFile<'d, E, R>> for GenerateSymbolPass
+where
+    E: ElfFileHeader,
+    R: ReadRef<'d>,
+{
     const NAME: &'static str = "generate symbols";
 
-    type Output<'a> = SymbolMap;
+    type Output = SymbolMap;
     type Error = ReadError;
 
-    fn run<'d, E, R>(
-        &mut self,
-        ctx: &PassContext<'d>,
-        input: &ElfFile<'d, E, R>,
-        output: &mut OutputObject<'d>,
-    ) -> Result<Self::Output<'d>, Self::Error>
+    fn run(&mut self, ctx: &PassContext<ElfFile<'d, E, R>>) -> Result<Self::Output, Self::Error>
     where
         E: ElfFileHeader,
         R: ReadRef<'d>,
     {
+        let mut output = ctx.output.borrow_mut();
+
         let cls_output = ctx.get_pass_output(self.cls_pass);
 
         let mut sym_map = HashMap::new();
-        for input_sym in input.dynamic_symbols() {
+        for input_sym in ctx.input.dynamic_symbols() {
             // Ensure that the section containing the symbol has been copied into the output relocatable file. If not,
             // such symbols will not cause the generation of an output symbol.
             if let Some(sym_section_idx) = input_sym.section_index() {

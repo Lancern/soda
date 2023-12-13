@@ -5,13 +5,12 @@ use object::read::elf::{
     ElfFile, ElfSection, ElfSegment, FileHeader as ElfFileHeader, ProgramHeader as _,
 };
 use object::read::Error as ReadError;
-use object::write::{Object as OutputObject, SectionId, SymbolId};
+use object::write::{SectionId, SymbolId};
 use object::{
     Object, ObjectSection, ObjectSegment, ReadRef, SectionFlags, SectionIndex, SectionKind,
 };
 
-use crate::elf::pass::ElfPass;
-use crate::pass::PassContext;
+use crate::pass::{Pass, PassContext};
 
 /// A pass that copies loadable sections in the input shared library into the output relocatable object.
 ///
@@ -20,22 +19,23 @@ use crate::pass::PassContext;
 #[derive(Debug, Default)]
 pub struct CopyLodableSectionsPass;
 
-impl ElfPass for CopyLodableSectionsPass {
+impl<'d, E, R> Pass<ElfFile<'d, E, R>> for CopyLodableSectionsPass
+where
+    E: ElfFileHeader,
+    R: ReadRef<'d>,
+{
     const NAME: &'static str = "copy sections";
 
-    type Output<'d> = CopyLodableSectionsOutput;
+    type Output = CopyLodableSectionsOutput;
     type Error = ReadError;
 
-    fn run<'d, E, R>(
-        &mut self,
-        _ctx: &PassContext<'d>,
-        input: &ElfFile<'d, E, R>,
-        output: &mut OutputObject<'d>,
-    ) -> Result<Self::Output<'d>, Self::Error>
+    fn run(&mut self, ctx: &PassContext<ElfFile<'d, E, R>>) -> Result<Self::Output, Self::Error>
     where
         E: ElfFileHeader,
         R: ReadRef<'d>,
     {
+        let mut output = ctx.output.borrow_mut();
+
         // TODO: make the output section's name customizable.
         let output_sec_id = output.add_section(
             Vec::new(),
@@ -48,7 +48,7 @@ impl ElfPass for CopyLodableSectionsPass {
         let mut ret = CopyLodableSectionsOutput::new(output_sec_id, output_sec_sym);
 
         // First we collect all loadable sections.
-        let input_sections = collect_loadable_sections(input);
+        let input_sections = collect_loadable_sections(&ctx.input);
         if input_sections.is_empty() {
             return Ok(ret);
         }

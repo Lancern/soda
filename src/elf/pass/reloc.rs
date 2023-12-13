@@ -1,35 +1,32 @@
 use object::elf::{R_X86_64_GLOB_DAT, R_X86_64_JUMP_SLOT, R_X86_64_RELATIVE};
 use object::read::elf::{ElfFile, FileHeader as ElfFileHeader};
 use object::read::Error as ReadError;
-use object::write::{Object as OutputObject, Relocation as OutputRelocation};
+use object::write::Relocation as OutputRelocation;
 use object::{Architecture, Object as _, ReadRef, RelocationKind, RelocationTarget};
 use thiserror::Error;
 
 use crate::elf::pass::section::CopyLodableSectionsPass;
 use crate::elf::pass::symbol::GenerateSymbolPass;
-use crate::elf::pass::{ElfPass, ElfPassHandle};
-use crate::pass::PassContext;
+use crate::pass::{Pass, PassContext, PassHandle};
 
 /// A pass that converts the dynamic relocations in the input shared library into corresponding static relocations in
 /// the output relocatable file.
 #[derive(Debug)]
 pub struct ConvertRelocationPass {
-    pub cls_pass: ElfPassHandle<CopyLodableSectionsPass>,
-    pub sym_gen_pass: ElfPassHandle<GenerateSymbolPass>,
+    pub cls_pass: PassHandle<CopyLodableSectionsPass>,
+    pub sym_gen_pass: PassHandle<GenerateSymbolPass>,
 }
 
 impl ConvertRelocationPass {
-    fn convert_x86_64_relocations<'d, 'f, E, R>(
+    fn convert_x86_64_relocations<'d, E, R>(
         &self,
-        ctx: &PassContext<'d>,
-        input: &ElfFile<'d, E, R>,
-        output: &mut OutputObject<'d>,
+        ctx: &PassContext<ElfFile<'d, E, R>>,
     ) -> Result<(), ConvertRelocationError>
     where
         E: ElfFileHeader,
         R: ReadRef<'d>,
     {
-        let input_reloc_iter = match input.dynamic_relocations() {
+        let input_reloc_iter = match ctx.input.dynamic_relocations() {
             Some(iter) => iter,
             None => {
                 return Ok(());
@@ -38,6 +35,8 @@ impl ConvertRelocationPass {
 
         let cls_output = ctx.get_pass_output(self.cls_pass);
         let sym_map = ctx.get_pass_output(self.sym_gen_pass);
+
+        let mut output = ctx.output.borrow_mut();
 
         for (input_reloc_addr, input_reloc) in input_reloc_iter {
             let output_reloc_offset = match cls_output.map_input_addr(input_reloc_addr) {
@@ -101,25 +100,24 @@ impl ConvertRelocationPass {
     }
 }
 
-impl ElfPass for ConvertRelocationPass {
+impl<'d, E, R> Pass<ElfFile<'d, E, R>> for ConvertRelocationPass
+where
+    E: ElfFileHeader,
+    R: ReadRef<'d>,
+{
     const NAME: &'static str = "convert relocations";
 
-    type Output<'a> = ();
+    type Output = ();
     type Error = ConvertRelocationError;
 
-    fn run<'d, E, R>(
-        &mut self,
-        ctx: &PassContext<'d>,
-        input: &ElfFile<'d, E, R>,
-        output: &mut OutputObject<'d>,
-    ) -> Result<Self::Output<'d>, Self::Error>
+    fn run(&mut self, ctx: &PassContext<ElfFile<'d, E, R>>) -> Result<Self::Output, Self::Error>
     where
         E: ElfFileHeader,
         R: ReadRef<'d>,
     {
-        match input.architecture() {
+        match ctx.input.architecture() {
             Architecture::X86_64 => {
-                self.convert_x86_64_relocations(ctx, input, output)?;
+                self.convert_x86_64_relocations(ctx)?;
             }
             arch => {
                 return Err(ConvertRelocationError::UnsupportedArch(arch));

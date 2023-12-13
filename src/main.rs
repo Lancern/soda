@@ -1,19 +1,18 @@
-mod ctx;
 mod elf;
 mod pass;
+mod utils;
 
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
 use anyhow::{anyhow, Context as _};
 use log::{Level as LogLevel, SetLoggerError};
-use object::BinaryFormat;
+use object::read::{File as InputFile, ObjectKind};
+use object::Object as _;
 use structopt::StructOpt;
-
-use crate::ctx::Context;
-use crate::pass::PassManager;
 
 #[derive(Clone, Debug, StructOpt)]
 #[structopt(
@@ -57,25 +56,31 @@ impl Args {
     }
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> ExitCode {
     let args = Args::from_args();
+    if let Err(err) = do_main(&args) {
+        eprintln!("Error: {:#}", err);
+        return ExitCode::FAILURE;
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn do_main(args: &Args) -> anyhow::Result<()> {
     init_logger(args.verbosity)?;
 
     log::info!("Reading input shared library ...");
     let input_buffer = std::fs::read(&args.input).context(format!(
-        "failed to read input shared library \"{}\"",
+        "cannot read input shared library \"{}\"",
+        args.input.display()
+    ))?;
+    let input_file = InputFile::parse(input_buffer.as_slice()).context(format!(
+        "cannot parse input shared library \"{}\"",
         args.input.display()
     ))?;
 
-    let mut ctx = Context::new(&input_buffer)?;
-
-    // Initialize passes.
-    let mut passes = PassManager::new();
-    match ctx.format() {
-        BinaryFormat::Elf => {
-            crate::elf::init_passes(&mut passes);
-        }
-        _ => unreachable!(),
+    if input_file.kind() != ObjectKind::Dynamic {
+        return Err(anyhow::Error::msg("input file is not a shared library"));
     }
 
     // Open the output file, preparing to write later.
@@ -85,13 +90,23 @@ fn main() -> anyhow::Result<()> {
         output_path.display()
     ))?;
 
-    // Run the passes.
-    log::info!("Running all registered passes ...");
-    passes.run(&mut ctx)?;
+    // Convert the input shared library into output relocatable file.
+    log::info!("Start the conversion");
+    let output_object = match input_file {
+        InputFile::Elf32(elf_file) => crate::elf::convert(elf_file)?,
+        InputFile::Elf64(elf_file) => crate::elf::convert(elf_file)?,
+        _ => {
+            let err = anyhow::Error::msg(format!(
+                "{} format is not supported yet",
+                crate::utils::stringify::binary_format_to_str(input_file.format())
+            ));
+            return Err(err);
+        }
+    };
 
     // Save the produced output object to the output file.
     log::info!("Writing output file ...");
-    ctx.output
+    output_object
         .write_stream(output_file.writer())
         .map_err(|err| anyhow!(format!("{:?}", err)))
         .context(format!(
