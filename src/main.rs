@@ -96,11 +96,10 @@ fn do_main(args: &Args) -> anyhow::Result<()> {
         InputFile::Elf32(elf_file) => crate::elf::convert(elf_file)?,
         InputFile::Elf64(elf_file) => crate::elf::convert(elf_file)?,
         _ => {
-            let err = anyhow::Error::msg(format!(
+            return Err(anyhow!(
                 "{} format is not supported yet",
                 crate::utils::stringify::binary_format_to_str(input_file.format())
             ));
-            return Err(err);
         }
     };
 
@@ -108,7 +107,7 @@ fn do_main(args: &Args) -> anyhow::Result<()> {
     log::info!("Writing output file ...");
     output_object
         .write_stream(output_file.writer())
-        .map_err(|err| anyhow!(format!("{:?}", err)))
+        .map_err(|err| anyhow!("{:?}", err))
         .context(format!(
             "failed to write output file \"{}\"",
             output_path.display()

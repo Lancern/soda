@@ -1,5 +1,6 @@
 use object::{Architecture, BinaryFormat};
 
+/// Get the string representation of a `BinaryFormat` value.
 pub fn binary_format_to_str(f: BinaryFormat) -> &'static str {
     match f {
         BinaryFormat::Coff => "coff",
@@ -12,6 +13,7 @@ pub fn binary_format_to_str(f: BinaryFormat) -> &'static str {
     }
 }
 
+/// Get the string representation of an `Architecture` value.
 pub fn arch_to_str(arch: Architecture) -> &'static str {
     match arch {
         Architecture::Unknown => "unknown",

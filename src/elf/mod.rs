@@ -1,20 +1,24 @@
 mod pass;
 
+use anyhow::anyhow;
 use object::read::elf::{ElfFile, FileHeader as ElfFileHeader};
 use object::write::Object as OutputObject;
-use object::{BinaryFormat, Endian, Endianness, Object as _, ReadRef};
+use object::{Architecture, BinaryFormat, Endian, Endianness, Object as _, ObjectKind, ReadRef};
 
 use crate::elf::pass::reloc::ConvertRelocationPass;
 use crate::elf::pass::section::CopyLodableSectionsPass;
 use crate::elf::pass::symbol::GenerateSymbolPass;
 use crate::pass::PassManager;
 
+/// Convert the given ELF input shared library into an ELF relocatable file.
 pub fn convert<'d, E, R>(input: ElfFile<'d, E, R>) -> anyhow::Result<OutputObject<'static>>
 where
     E: ElfFileHeader,
     R: ReadRef<'d>,
 {
-    let output = create_elf_output(&input);
+    assert_eq!(input.kind(), ObjectKind::Dynamic);
+
+    let output = create_elf_output(&input)?;
 
     let mut pass_mgr = PassManager::new();
     init_passes(&mut pass_mgr);
@@ -23,14 +27,24 @@ where
     Ok(output)
 }
 
-fn create_elf_output<'d, E, R>(input: &ElfFile<'d, E, R>) -> OutputObject<'static>
+fn create_elf_output<'d, E, R>(input: &ElfFile<'d, E, R>) -> anyhow::Result<OutputObject<'static>>
 where
     E: ElfFileHeader,
     R: ReadRef<'d>,
 {
+    const SUPPORTED_ARCH: &'static [Architecture] = &[Architecture::X86_64];
+
     let endian = Endianness::from_big_endian(input.endian().is_big_endian()).unwrap();
     let arch = input.architecture();
-    OutputObject::new(BinaryFormat::Elf, arch, endian)
+
+    if !SUPPORTED_ARCH.contains(&arch) {
+        return Err(anyhow!(
+            "unsupported architecture: {}",
+            crate::utils::stringify::arch_to_str(arch)
+        ));
+    }
+
+    Ok(OutputObject::new(BinaryFormat::Elf, arch, endian))
 }
 
 /// Register passes required to convert an ELF shared library.
