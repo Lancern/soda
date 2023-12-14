@@ -194,3 +194,56 @@ where
         Ok(Box::new(output))
     }
 }
+
+#[cfg(test)]
+pub mod test {
+    use std::convert::Infallible;
+
+    use super::*;
+
+    pub trait PassTest: 'static {
+        type Input;
+        type Pass: Pass<Self::Input>;
+
+        fn setup(&mut self, pass_mgr: &mut PassManager<Self::Input>) -> PassHandle<Self::Pass>;
+
+        fn check_pass_output(&mut self, output: &<Self::Pass as Pass<Self::Input>>::Output) {}
+        fn check_output_object(&mut self, output: &OutputObject<'static>) {}
+    }
+
+    pub fn run_pass_test<T>(mut test: T, input: T::Input, output: OutputObject<'static>)
+    where
+        T: PassTest,
+    {
+        let mut pass_mgr = PassManager::new();
+        let target_pass = test.setup(&mut pass_mgr);
+
+        pass_mgr.add_pass(TestPass { test, target_pass });
+        pass_mgr.run(input, output).unwrap();
+    }
+
+    struct TestPass<T>
+    where
+        T: PassTest,
+    {
+        test: T,
+        target_pass: PassHandle<T::Pass>,
+    }
+
+    impl<T> Pass<T::Input> for TestPass<T>
+    where
+        T: PassTest,
+    {
+        const NAME: &'static str = "unit test";
+
+        type Output = ();
+        type Error = Infallible;
+
+        fn run(&mut self, ctx: &PassContext<T::Input>) -> Result<Self::Output, Self::Error> {
+            self.test
+                .check_pass_output(ctx.get_pass_output(self.target_pass));
+            self.test.check_output_object(&*ctx.output.borrow());
+            Ok(())
+        }
+    }
+}

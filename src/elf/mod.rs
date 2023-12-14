@@ -1,5 +1,8 @@
 mod pass;
 
+#[cfg(test)]
+mod test;
+
 use anyhow::anyhow;
 use object::read::elf::{ElfFile, FileHeader as ElfFileHeader};
 use object::write::Object as OutputObject;

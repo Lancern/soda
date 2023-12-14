@@ -45,9 +45,14 @@ where
         let output_sec_sym = output.section_symbol(output_sec_id);
         let output_sec = output.section_mut(output_sec_id);
 
-        let mut ret = CopyLodableSectionsOutput::new(output_sec_id, output_sec_sym);
+        let mut ret = CopyLodableSectionsOutput {
+            output_section_id: output_sec_id,
+            output_section_symbol: output_sec_sym,
+            output_section_size: 0,
+            section_maps: Vec::new(),
+        };
 
-        // First we collect all loadable sections.
+        // First we collect all loadable sections. The returned section list is sorted by their base addresses.
         let input_sections = collect_loadable_sections(&ctx.input);
         if input_sections.is_empty() {
             return Ok(ret);
@@ -67,22 +72,30 @@ where
             let input_sec_align = input_sec.align();
 
             if input_sec_addr < output_sec_size {
-                log::warn!("Overlapping section \"{}\"", input_sec_name);
+                log::warn!(
+                    "Overlapping section \"{}\" (section index {})",
+                    input_sec_name,
+                    input_sec.index().0
+                );
             }
-            if input_sec_addr % input_sec_align != 0 {
-                log::warn!("Unaligned input section \"{}\"", input_sec_name);
+            if input_sec_align != 0 && input_sec_addr % input_sec_align != 0 {
+                log::warn!(
+                    "Unaligned input section \"{}\" (section index {})",
+                    input_sec_name,
+                    input_sec.index().0
+                );
             }
 
             let input_sec_end = input_sec_addr.checked_add(input_sec_size).unwrap();
             output_sec_size = input_sec_end;
-            ret.input_section_ranges.push(SectionMap {
+            ret.section_maps.push(SectionMap {
                 index: input_sec.index(),
-                input_addr_range: input_sec_addr..input_sec_end,
-                output_addr_range: input_sec_addr..input_sec_end,
+                addr_range: input_sec_addr..input_sec_end,
             });
         }
 
         assert!(output_sec_size <= std::usize::MAX as u64);
+        ret.output_section_size = output_sec_size;
 
         // Calculate the alignment of the output section.
         let output_sec_align = input_sections.iter().map(|sec| sec.align()).max().unwrap();
@@ -91,11 +104,14 @@ where
         let mut output_buffer = vec![0u8; output_sec_size as usize];
         for input_sec in &input_sections {
             let sec_data = input_sec.uncompressed_data()?;
-            assert_eq!(sec_data.len(), input_sec.size() as usize);
+            assert!(sec_data.len() <= input_sec.size() as usize);
+
+            if sec_data.is_empty() {
+                continue;
+            }
 
             let input_sec_addr = input_sec.address();
-            let input_sec_size = input_sec.size();
-            let output_range = input_sec_addr as usize..(input_sec_addr + input_sec_size) as usize;
+            let output_range = input_sec_addr as usize..input_sec_addr as usize + sec_data.len();
 
             let output_slice = &mut output_buffer[output_range];
             output_slice.copy_from_slice(&sec_data);
@@ -127,6 +143,16 @@ where
 
         // Enumerate all sections in the current segment which is loadable.
         for input_sec in input.sections() {
+            // We don't deal with the UND section. (i.e. the section at index 0)
+            if input_sec.index().0 == 0 {
+                continue;
+            }
+
+            if input_sec.address() == 0 {
+                // Input sections whose address is 0 are not included in the memory image.
+                continue;
+            }
+
             if !is_section_in_segment(&input_sec, &seg) {
                 continue;
             }
@@ -179,8 +205,11 @@ pub struct CopyLodableSectionsOutput {
     /// The ID of the output section symbol.
     pub output_section_symbol: SymbolId,
 
+    /// Size of the output section.
+    pub output_section_size: u64,
+
     /// Gives the information about copied sections.
-    pub input_section_ranges: Vec<SectionMap>,
+    pub section_maps: Vec<SectionMap>,
 }
 
 impl CopyLodableSectionsOutput {
@@ -189,40 +218,18 @@ impl CopyLodableSectionsOutput {
         self.get_section_map(idx).is_some()
     }
 
-    /// Given an input address, get the offset of the corresponding location in the output section.
-    pub fn map_input_addr(&self, input_addr: u64) -> Option<u64> {
-        self.get_section_map_by_addr(input_addr).map(|map| {
-            let section_offset = input_addr - map.input_addr_range.start;
-            map.output_addr_range.start + section_offset
-        })
-    }
-
-    fn new(output_section_id: SectionId, output_section_symbol: SymbolId) -> Self {
-        Self {
-            output_section_id,
-            output_section_symbol,
-            input_section_ranges: Vec::new(),
-        }
-    }
-
     fn get_section_map(&self, section_idx: SectionIndex) -> Option<&SectionMap> {
-        self.input_section_ranges
+        self.section_maps
             .iter()
             .find(|map| map.index == section_idx)
-    }
-
-    fn get_section_map_by_addr(&self, addr: u64) -> Option<&SectionMap> {
-        self.input_section_ranges
-            .iter()
-            .find(|map| map.input_addr_range.contains(&addr))
     }
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(test, derive(Eq, PartialEq))]
 pub struct SectionMap {
     pub index: SectionIndex,
-    pub input_addr_range: Range<u64>,
-    pub output_addr_range: Range<u64>,
+    pub addr_range: Range<u64>,
 }
 
 fn is_section_in_segment<'d, 'f, E, R>(
@@ -243,4 +250,87 @@ where
     let seg_end_addr = seg_addr + seg_size;
 
     sec_addr >= seg_addr && sec_end_addr <= seg_end_addr
+}
+
+#[cfg(test)]
+mod test {
+    use object::read::elf::ElfFile64;
+    use object::write::Object as OutputObject;
+    use object::{Architecture, BinaryFormat, Endianness};
+
+    use crate::pass::test::PassTest;
+    use crate::pass::{PassHandle, PassManager};
+
+    use super::*;
+
+    struct CopyLoadableSectionPassTest;
+
+    impl PassTest for CopyLoadableSectionPassTest {
+        type Input = ElfFile64<'static>;
+        type Pass = CopyLodableSectionsPass;
+
+        fn setup(&mut self, pass_mgr: &mut PassManager<Self::Input>) -> PassHandle<Self::Pass> {
+            pass_mgr.add_pass_default::<CopyLodableSectionsPass>()
+        }
+
+        fn check_pass_output(&mut self, output: &<Self::Pass as Pass<Self::Input>>::Output) {
+            fn addr_range(addr: u64, size: u64) -> Range<u64> {
+                addr..addr + size
+            }
+
+            macro_rules! make_section_maps {
+                ( $( { $index:expr, $addr:expr, $size:expr $(,)? } ),* $(,)? ) => {
+                    vec![
+                        $(
+                            SectionMap {
+                                index: SectionIndex($index),
+                                addr_range: addr_range($addr, $size),
+                            }
+                        ),*
+                    ]
+                };
+            }
+
+            assert_eq!(output.output_section_size, 0x95e28);
+            assert_eq!(
+                output.section_maps,
+                make_section_maps! {
+                    { 1, 0x2e0, 0x30 },
+                    { 2, 0x310, 0x24 },
+                    { 3, 0x338, 0x2910 },
+                    { 4, 0x2c48, 0x8a48 },
+                    { 5, 0xb690, 0x1cb3f },
+                    { 6, 0x281d0, 0xb86 },
+                    { 7, 0x28d58, 0x180 },
+                    { 8, 0x28ed8, 0x7320 },
+                    { 9, 0x301f8, 0x2280 },
+                    { 10, 0x33000, 0x1b },
+                    { 11, 0x33020, 0x1710 },
+                    { 12, 0x34730, 0x28 },
+                    { 13, 0x34760, 0x4a4a4 },
+                    { 14, 0x7ec04, 0xd },
+                    { 15, 0x7f000, 0x4d70 },
+                    { 16, 0x83d70, 0x1b5c },
+                    { 17, 0x858d0, 0x9804 },
+                    { 18, 0x8f0d4, 0x2234 },
+                    { 19, 0x92390, 0x10 },
+                    { 20, 0x92390, 0x8 },
+                    { 21, 0x92398, 0x8 },
+                    { 22, 0x923a0, 0x2490 },
+                    { 23, 0x94830, 0x210 },
+                    { 24, 0x94a40, 0x598 },
+                    { 25, 0x94fe8, 0xb98 },
+                    { 26, 0x95b80, 0xa0 },
+                    { 27, 0x95c20, 0x208 },
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn test_cls_pass() {
+        let input = crate::elf::test::get_test_input_file();
+        let output = OutputObject::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
+        crate::pass::test::run_pass_test(CopyLoadableSectionPassTest, input, output);
+    }
 }

@@ -39,35 +39,21 @@ impl ConvertRelocationPass {
         let mut output = ctx.output.borrow_mut();
 
         for (input_reloc_addr, input_reloc) in input_reloc_iter {
-            let output_reloc_offset = match cls_output.map_input_addr(input_reloc_addr) {
-                Some(offset) => offset,
-                None => {
-                    continue;
-                }
-            };
+            if input_reloc_addr >= cls_output.output_section_size {
+                todo!();
+            }
+
+            let output_reloc_offset = input_reloc_addr;
 
             let output_reloc = match input_reloc.kind() {
-                RelocationKind::Elf(R_X86_64_RELATIVE) => {
-                    // For an R_X86_64_RELATIVE reloc, its addend is the virtual address of the relocation target in the
-                    // input shared library. Thus we need to map its addend to the corresponding location in the output
-                    // relocatable section.
-                    let output_addend = match cls_output.map_input_addr(input_reloc.addend() as u64)
-                    {
-                        Some(addend) => addend,
-                        None => {
-                            log::warn!("Relocation target is out of lodable input sections");
-                            continue;
-                        }
-                    };
-                    OutputRelocation {
-                        offset: output_reloc_offset,
-                        size: input_reloc.size(),
-                        kind: RelocationKind::Absolute,
-                        encoding: input_reloc.encoding(),
-                        symbol: cls_output.output_section_symbol,
-                        addend: output_addend as i64,
-                    }
-                }
+                RelocationKind::Elf(R_X86_64_RELATIVE) => OutputRelocation {
+                    offset: output_reloc_offset,
+                    size: input_reloc.size(),
+                    kind: RelocationKind::Absolute,
+                    encoding: input_reloc.encoding(),
+                    symbol: cls_output.output_section_symbol,
+                    addend: input_reloc.addend(),
+                },
 
                 RelocationKind::Elf(R_X86_64_GLOB_DAT)
                 | RelocationKind::Elf(R_X86_64_JUMP_SLOT) => {
