@@ -48,12 +48,16 @@ impl ConvertRelocationPass {
                 continue;
             }
 
+            if input_reloc.size() != 0 && input_reloc.size() != 64 {
+                log::warn!("Unexpected relocation size");
+            }
+
             let output_reloc_offset = input_reloc_addr;
 
             let output_reloc = match input_reloc.kind() {
                 RelocationKind::Elf(R_X86_64_RELATIVE) => OutputRelocation {
                     offset: output_reloc_offset,
-                    size: input_reloc.size(),
+                    size: 64,
                     kind: RelocationKind::Absolute,
                     encoding: input_reloc.encoding(),
                     symbol: cls_output.output_section_symbol,
@@ -71,7 +75,7 @@ impl ConvertRelocationPass {
                     let output_sym_id = sym_map.get_output_symbol(target_sym_idx).unwrap();
                     OutputRelocation {
                         offset: output_reloc_offset,
-                        size: input_reloc.size(),
+                        size: 64,
                         kind: RelocationKind::Absolute,
                         encoding: input_reloc.encoding(),
                         symbol: output_sym_id,
@@ -81,7 +85,7 @@ impl ConvertRelocationPass {
 
                 RelocationKind::Elf(R_X86_64_DTPMOD64) => OutputRelocation {
                     offset: output_reloc_offset,
-                    size: input_reloc.size(),
+                    size: 64,
                     kind: RelocationKind::Elf(R_X86_64_DTPMOD64),
                     encoding: input_reloc.encoding(),
                     symbol: cls_output.output_section_symbol, // TODO: no symbols should be associated with this reloc.

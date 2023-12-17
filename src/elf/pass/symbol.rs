@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use object::elf::STB_LOCAL;
+use object::elf::{STB_GLOBAL, STB_GNU_UNIQUE, STB_LOCAL};
 use object::read::elf::{ElfFile, ElfSymbol, FileHeader as ElfFileHeader};
 use object::read::Error as ReadError;
 use object::write::{Symbol as OutputSymbol, SymbolId, SymbolSection as OutputSymbolSection};
@@ -95,14 +95,19 @@ where
         _ => unreachable!(),
     };
 
-    let (st_info, st_other) = match input_sym.flags() {
+    let (mut st_info, st_other) = match input_sym.flags() {
         SymbolFlags::Elf { st_info, st_other } => (st_info, st_other),
         _ => unreachable!(),
     };
 
+    let mut bind = st_info >> 4;
+    if bind == STB_GNU_UNIQUE {
+        bind = STB_GLOBAL;
+        st_info = (STB_GLOBAL << 4) | (st_info & 0xF);
+    }
+
     let scope = match input_sym.scope() {
         SymbolScope::Unknown => {
-            let bind = st_info >> 4;
             if bind == STB_LOCAL {
                 SymbolScope::Compilation
             } else {

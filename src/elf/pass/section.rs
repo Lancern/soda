@@ -39,7 +39,7 @@ where
         // TODO: make the output section's name customizable.
         let output_sec_id = output.add_section(
             Vec::new(),
-            "soda".as_bytes().to_vec(),
+            ".soda".as_bytes().to_vec(),
             SectionKind::Elf(SHT_PROGBITS),
         );
         let output_sec_sym = output.section_symbol(output_sec_id);
