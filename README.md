@@ -5,6 +5,16 @@ Convert shared libraries into static libraries.
 > [!NOTE]
 > This project is still under early development phase.
 
+## Usage
+
+```bash
+soda /path/to/your/libfoo.so
+```
+
+You can specify `-o` to change the output file name. If omitted, the default
+output file name will be `foo.o` if the input shared library is named
+`libfoo.so`.
+
 ## Build
 
 You need the latest stable Rust toolchain to build `soda`. Refer to [rustup] if
