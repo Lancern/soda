@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
+use object::elf::STB_LOCAL;
 use object::read::elf::{ElfFile, ElfSymbol, FileHeader as ElfFileHeader};
 use object::read::Error as ReadError;
 use object::write::{Symbol as OutputSymbol, SymbolId, SymbolSection as OutputSymbolSection};
-use object::{Object, ObjectSymbol, ReadRef, SymbolFlags, SymbolIndex, SymbolSection};
+use object::{Object, ObjectSymbol, ReadRef, SymbolFlags, SymbolIndex, SymbolScope, SymbolSection};
 
 use crate::elf::pass::section::{CopyLodableSectionsOutput, CopyLodableSectionsPass};
 use crate::pass::{Pass, PassContext, PassHandle};
@@ -99,14 +100,63 @@ where
         _ => unreachable!(),
     };
 
+    let scope = match input_sym.scope() {
+        SymbolScope::Unknown => {
+            let bind = st_info >> 4;
+            if bind == STB_LOCAL {
+                SymbolScope::Compilation
+            } else {
+                SymbolScope::Linkage
+            }
+        }
+        SymbolScope::Dynamic => SymbolScope::Linkage,
+        scope => scope,
+    };
+
     Ok(OutputSymbol {
         name,
         value: input_sym.address(),
         size: input_sym.size(),
         kind: input_sym.kind(),
-        scope: input_sym.scope(),
+        scope,
         weak: input_sym.is_weak(),
         section,
         flags: SymbolFlags::Elf { st_info, st_other },
     })
+}
+
+#[cfg(test)]
+mod test {
+    use object::read::elf::ElfFile64;
+    use object::write::Object as OutputObject;
+    use object::{Architecture, BinaryFormat, Endianness};
+
+    use crate::elf::pass::section::CopyLodableSectionsPass;
+    use crate::pass::test::PassTest;
+    use crate::pass::{Pass, PassHandle, PassManager};
+
+    use super::GenerateSymbolPass;
+
+    struct GenerateSymbolPassTest;
+
+    impl PassTest for GenerateSymbolPassTest {
+        type Input = ElfFile64<'static>;
+        type Pass = GenerateSymbolPass;
+
+        fn setup(&mut self, pass_mgr: &mut PassManager<Self::Input>) -> PassHandle<Self::Pass> {
+            let cls_pass = pass_mgr.add_pass_default::<CopyLodableSectionsPass>();
+            pass_mgr.add_pass(GenerateSymbolPass { cls_pass })
+        }
+
+        fn check_pass_output(&mut self, output: &<Self::Pass as Pass<Self::Input>>::Output) {
+            assert_eq!(output.0.len(), 1475);
+        }
+    }
+
+    #[test]
+    fn test_generate_symbol_pass() {
+        let input = crate::elf::test::get_test_input_file();
+        let output = OutputObject::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
+        crate::pass::test::run_pass_test(GenerateSymbolPassTest, input, output);
+    }
 }

@@ -254,14 +254,17 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::ops::Range;
+
     use object::read::elf::ElfFile64;
+    use object::read::SectionIndex;
     use object::write::Object as OutputObject;
     use object::{Architecture, BinaryFormat, Endianness};
 
     use crate::pass::test::PassTest;
-    use crate::pass::{PassHandle, PassManager};
+    use crate::pass::{Pass, PassHandle, PassManager};
 
-    use super::*;
+    use super::{CopyLodableSectionsPass, SectionMap};
 
     struct CopyLoadableSectionPassTest;
 

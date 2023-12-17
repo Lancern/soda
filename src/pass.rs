@@ -207,7 +207,10 @@ pub mod test {
 
         fn setup(&mut self, pass_mgr: &mut PassManager<Self::Input>) -> PassHandle<Self::Pass>;
 
+        #[allow(unused_variables)]
         fn check_pass_output(&mut self, output: &<Self::Pass as Pass<Self::Input>>::Output) {}
+
+        #[allow(unused_variables)]
         fn check_output_object(&mut self, output: &OutputObject<'static>) {}
     }
 
