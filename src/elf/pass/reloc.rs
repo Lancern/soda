@@ -1,4 +1,6 @@
-use object::elf::{R_X86_64_GLOB_DAT, R_X86_64_JUMP_SLOT, R_X86_64_RELATIVE};
+use object::elf::{
+    R_X86_64_64, R_X86_64_DTPMOD64, R_X86_64_GLOB_DAT, R_X86_64_JUMP_SLOT, R_X86_64_RELATIVE,
+};
 use object::read::elf::{ElfFile, FileHeader as ElfFileHeader};
 use object::read::Error as ReadError;
 use object::write::Relocation as OutputRelocation;
@@ -26,6 +28,8 @@ impl ConvertRelocationPass {
         E: ElfFileHeader,
         R: ReadRef<'d>,
     {
+        assert_eq!(ctx.input.architecture(), Architecture::X86_64);
+
         let input_reloc_iter = match ctx.input.dynamic_relocations() {
             Some(iter) => iter,
             None => {
@@ -40,7 +44,8 @@ impl ConvertRelocationPass {
 
         for (input_reloc_addr, input_reloc) in input_reloc_iter {
             if input_reloc_addr >= cls_output.output_section_size {
-                todo!();
+                log::warn!("Relocation happens outside of loadable sections");
+                continue;
             }
 
             let output_reloc_offset = input_reloc_addr;
@@ -55,7 +60,9 @@ impl ConvertRelocationPass {
                     addend: input_reloc.addend(),
                 },
 
-                RelocationKind::Elf(R_X86_64_GLOB_DAT)
+                RelocationKind::Absolute
+                | RelocationKind::Elf(R_X86_64_64)
+                | RelocationKind::Elf(R_X86_64_GLOB_DAT)
                 | RelocationKind::Elf(R_X86_64_JUMP_SLOT) => {
                     let target_sym_idx = match input_reloc.target() {
                         RelocationTarget::Symbol(sym_idx) => sym_idx,
@@ -71,6 +78,15 @@ impl ConvertRelocationPass {
                         addend: input_reloc.addend(),
                     }
                 }
+
+                RelocationKind::Elf(R_X86_64_DTPMOD64) => OutputRelocation {
+                    offset: output_reloc_offset,
+                    size: input_reloc.size(),
+                    kind: RelocationKind::Elf(R_X86_64_DTPMOD64),
+                    encoding: input_reloc.encoding(),
+                    symbol: cls_output.output_section_symbol, // TODO: no symbols should be associated with this reloc.
+                    addend: input_reloc.addend(),
+                },
 
                 kind => {
                     return Err(ConvertRelocationError::UnsupportedReloc(kind));
@@ -125,4 +141,41 @@ pub enum ConvertRelocationError {
 
     #[error("unsupported reloc: {0:?}")]
     UnsupportedReloc(RelocationKind),
+}
+
+#[cfg(test)]
+mod test {
+    use object::read::elf::ElfFile64;
+    use object::write::Object as OutputObject;
+    use object::{Architecture, BinaryFormat, Endianness};
+
+    use crate::elf::pass::section::CopyLodableSectionsPass;
+    use crate::elf::pass::symbol::GenerateSymbolPass;
+    use crate::pass::test::PassTest;
+    use crate::pass::{PassHandle, PassManager};
+
+    use super::ConvertRelocationPass;
+
+    struct ConvertRelocationPassTest;
+
+    impl PassTest for ConvertRelocationPassTest {
+        type Input = ElfFile64<'static>;
+        type Pass = ConvertRelocationPass;
+
+        fn setup(&mut self, pass_mgr: &mut PassManager<Self::Input>) -> PassHandle<Self::Pass> {
+            let cls_pass = pass_mgr.add_pass_default::<CopyLodableSectionsPass>();
+            let sym_gen_pass = pass_mgr.add_pass(GenerateSymbolPass { cls_pass });
+            pass_mgr.add_pass(ConvertRelocationPass {
+                cls_pass,
+                sym_gen_pass,
+            })
+        }
+    }
+
+    #[test]
+    fn test_convert_relocation_pass() {
+        let input = crate::elf::test::get_test_input_file();
+        let output = OutputObject::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
+        crate::pass::test::run_pass_test(ConvertRelocationPassTest, input, output);
+    }
 }
