@@ -8,6 +8,7 @@ use object::read::elf::{ElfFile, FileHeader as ElfFileHeader};
 use object::write::Object as OutputObject;
 use object::{Architecture, BinaryFormat, Endian, Endianness, Object as _, ObjectKind, ReadRef};
 
+use crate::elf::pass::init_array::{GenerateFiniArrayPass, GenerateInitArrayPass};
 use crate::elf::pass::reloc::ConvertRelocationPass;
 use crate::elf::pass::section::CopyLodableSectionsPass;
 use crate::elf::pass::symbol::GenerateSymbolPass;
@@ -68,4 +69,8 @@ where
         cls_pass,
         sym_gen_pass,
     });
+
+    // Generate .init_array and .fini_array sections in the output relocatable file.
+    pass_mgr.add_pass(GenerateInitArrayPass::new(cls_pass));
+    pass_mgr.add_pass(GenerateFiniArrayPass::new(cls_pass));
 }
